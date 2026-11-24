@@ -1,0 +1,62 @@
+# Veracode Auto-Fix pipeline (PoC skeleton)
+#
+# Stages:
+#   collect  - fetch the latest Veracode findings for this repo/branch
+#   fix      - apply Veracode Fix (SAST, SCA) and the AI fallback
+#   verify   - build, test and re-scan; keep or revert each patch
+#   publish  - push the fix branch and open a merge request with the report
+#
+# Required masked/protected CI variables:
+#   VERACODE_API_KEY_ID, VERACODE_API_KEY_SECRET, SRCCLR_API_TOKEN,
+#   GITLAB_FIX_TOKEN, LLM_API_KEY
+
+stages: [collect, fix, verify, publish]
+
+variables:
+  VERACODE_APP_NAME: "$CI_PROJECT_NAME"   # override if the Veracode profile name differs
+  TARGET_BRANCH: "$CI_COMMIT_REF_NAME"
+  DRY_RUN: "false"                        # "true" = run everything except push/MR
+
+default:
+  # Image with Python, Veracode CLI, srcclr agent and the project's build toolchain
+  image: registry.example.com/security/veracode-autofix:latest
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "api"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'      # manual "Run pipeline"
+    - when: never
+
+collect_findings:
+  stage: collect
+  script:
+    - python -m autofix.collect --app "$VERACODE_APP_NAME" --branch "$TARGET_BRANCH" --out findings.json
+  artifacts:
+    paths: [findings.json]
+
+apply_fixes:
+  stage: fix
+  script:
+    - ./build.sh                                                   # produce the artifact for Pipeline Scan
+    - veracode static scan target/app.jar --results-file results.json
+    - srcclr scan --json > sca-results.json
+    - python -m autofix.fix --findings findings.json --sast-results results.json --sca-results sca-results.json
+  artifacts:
+    paths: [patches/, fix-log.json]
+
+verify_fixes:
+  stage: verify
+  script:
+    - python -m autofix.verify --patches patches/ --out verified.json
+  artifacts:
+    paths: [verified.json]
+
+publish_mr:
+  stage: publish
+  script:
+    - python -m autofix.publish --verified verified.json --report fix-report.md
+  artifacts:
+    paths: [fix-report.md, fix-report.json]
+  rules:
+    - if: '$DRY_RUN != "true"'

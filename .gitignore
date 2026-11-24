@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# Pipeline outputs
+findings.json
+results.json
+sca-results.json
+patches/
+fix-log.json
+verified.json
+fix-report.*
