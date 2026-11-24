@@ -1,0 +1,51 @@
+# Reusable GitLab CI template: include this from any repository that has a
+# Veracode application profile.
+#
+#   include:
+#     - project: "security/veracode-auto-fix"
+#       ref: main
+#       file: "templates/veracode-autofix.gitlab-ci.yml"
+#
+#   variables:
+#     BUILD_CMD: "mvn -B -q package -DskipTests"
+#     SCAN_ARTIFACT: "target/app.jar"
+#     FIX_SOURCE_DIR: "src/main/java"
+#
+# Required masked + protected CI/CD variables (Settings > CI/CD > Variables):
+#   VERACODE_API_KEY_ID, VERACODE_API_KEY_SECRET, SRCCLR_API_TOKEN,
+#   GITLAB_FIX_TOKEN, LLM_API_KEY (optional, for the AI fallback)
+
+variables:
+  VERACODE_AUTOFIX_IMAGE: "registry.example.com/security/veracode-auto-fix:latest"
+  OUTPUT_DIR: "$CI_PROJECT_DIR/autofix-output"
+  DRY_RUN: "false"
+
+.veracode_autofix_base:
+  image: $VERACODE_AUTOFIX_IMAGE
+  stage: test
+  variables:
+    GIT_DEPTH: "0"          # full history so the fix branch is based on the real commit
+    GIT_STRATEGY: clone
+  rules:
+    # Only on demand: scheduled pipelines, "Run pipeline" button, or API trigger.
+    - if: '$CI_PIPELINE_SOURCE =~ /^(schedule|web|api|trigger)$/ && $VERACODE_AUTOFIX == "true"'
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - autofix-output/
+    exclude:
+      - autofix-output/**/*.jar
+
+# Report only: fetch the latest Veracode findings for this branch.
+veracode_autofix_collect:
+  extends: .veracode_autofix_base
+  script:
+    - python -m autofix collect
+
+# Fix, verify, open the merge request and publish the report.
+veracode_autofix_remediate:
+  extends: .veracode_autofix_base
+  needs: [veracode_autofix_collect]
+  script:
+    - python -m autofix remediate

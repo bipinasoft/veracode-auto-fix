@@ -1,0 +1,19 @@
+[project]
+name = "veracode-auto-fix"
+version = "0.1.0"
+description = "Fix Veracode SAST/SCA findings in GitLab repositories with Veracode Fix and an AI fallback"
+requires-python = ">=3.10"
+dependencies = []   # standard library only at runtime
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+veracode-autofix = "autofix.__main__:main"
+
+[tool.setuptools]
+packages = ["autofix", "autofix.fixers"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,13 +1,8 @@
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
 .env
 
-# Pipeline outputs
-findings.json
-results.json
-sca-results.json
-patches/
-fix-log.json
-verified.json
-fix-report.*
+# Tool output
+autofix-output/

@@ -1,62 +1,28 @@
-# Veracode Auto-Fix pipeline (PoC skeleton)
-#
-# Stages:
-#   collect  - fetch the latest Veracode findings for this repo/branch
-#   fix      - apply Veracode Fix (SAST, SCA) and the AI fallback
-#   verify   - build, test and re-scan; keep or revert each patch
-#   publish  - push the fix branch and open a merge request with the report
-#
-# Required masked/protected CI variables:
-#   VERACODE_API_KEY_ID, VERACODE_API_KEY_SECRET, SRCCLR_API_TOKEN,
-#   GITLAB_FIX_TOKEN, LLM_API_KEY
+# CI for the Veracode Auto-Fix tool itself: test the code and publish the runner image.
+# Repositories that want auto-fix include templates/veracode-autofix.gitlab-ci.yml instead.
 
-stages: [collect, fix, verify, publish]
+stages: [test, build]
 
-variables:
-  VERACODE_APP_NAME: "$CI_PROJECT_NAME"   # override if the Veracode profile name differs
-  TARGET_BRANCH: "$CI_COMMIT_REF_NAME"
-  DRY_RUN: "false"                        # "true" = run everything except push/MR
-
-default:
-  # Image with Python, Veracode CLI, srcclr agent and the project's build toolchain
-  image: registry.example.com/security/veracode-autofix:latest
-
-workflow:
+unit_tests:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - pip install --quiet pytest
+    - python -m pytest -q
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'
-    - if: '$CI_PIPELINE_SOURCE == "api"'
-    - if: '$CI_PIPELINE_SOURCE == "web"'      # manual "Run pipeline"
-    - when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
 
-collect_findings:
-  stage: collect
+build_image:
+  stage: build
+  image: docker:27
+  services: [docker:27-dind]
+  variables:
+    IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
   script:
-    - python -m autofix.collect --app "$VERACODE_APP_NAME" --branch "$TARGET_BRANCH" --out findings.json
-  artifacts:
-    paths: [findings.json]
-
-apply_fixes:
-  stage: fix
-  script:
-    - ./build.sh                                                   # produce the artifact for Pipeline Scan
-    - veracode static scan target/app.jar --results-file results.json
-    - srcclr scan --json > sca-results.json
-    - python -m autofix.fix --findings findings.json --sast-results results.json --sca-results sca-results.json
-  artifacts:
-    paths: [patches/, fix-log.json]
-
-verify_fixes:
-  stage: verify
-  script:
-    - python -m autofix.verify --patches patches/ --out verified.json
-  artifacts:
-    paths: [verified.json]
-
-publish_mr:
-  stage: publish
-  script:
-    - python -m autofix.publish --verified verified.json --report fix-report.md
-  artifacts:
-    paths: [fix-report.md, fix-report.json]
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker build --build-arg BUILD_PACKAGES="${BUILD_PACKAGES:-openjdk-17-jdk-headless maven}" -t "$IMAGE" -t "$CI_REGISTRY_IMAGE:latest" .
+    - docker push "$IMAGE"
+    - docker push "$CI_REGISTRY_IMAGE:latest"
   rules:
-    - if: '$DRY_RUN != "true"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
